@@ -7,6 +7,17 @@
 ########################################################################
 import RPi.GPIO as GPIO
 import time
+from typing import Tuple
+import logging
+
+# GPIO Pins  GPIO.BOARD Numbering
+GPIO4 = 7
+GPIO18 = 12
+GPIO16 = 36
+GPIO20 = 38
+GPIO21 = 40
+
+
 
 # Defines the data bit that is transmitted preferentially in the shiftOut function.
 LSBFIRST = 1
@@ -15,10 +26,13 @@ MSBFIRST = 2
 dataPin = 11  # DS Pin of 74HC595(Pin14)
 latchPin = 13  # ST_CP Pin of 74HC595(Pin12)
 clockPin = 15  # CH_CP Pin of 74HC595(Pin11)
-switch_pin = 7  # GPIO4
-servo_pin = 12  # GPIO18
-servo_duty_locked = 10
-servo_duty_unlocked = 6
+req_switch_pin = GPIO4
+lid_switch1_pin = GPIO16
+lid_switch2_pin = GPIO20
+lock_switch_pin = GPIO21
+#servo_pin = 12  # GPIO18
+#servo_duty_locked = 10
+#servo_duty_unlocked = 6
 
 light_state = 0
 
@@ -35,12 +49,15 @@ def setup_gpio(callback):
     GPIO.setup(dataPin, GPIO.OUT)
     GPIO.setup(latchPin, GPIO.OUT)
     GPIO.setup(clockPin, GPIO.OUT)
-    GPIO.setup(switch_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-    GPIO.setup(servo_pin, GPIO.OUT)
-    GPIO.output(servo_pin, GPIO.LOW)
-    GPIO.add_event_detect(switch_pin, GPIO.FALLING, callback=callback, bouncetime=600)
-    p = GPIO.PWM(servo_pin, 50)  # Set frequency to 50hz
-    p.start(servo_duty_locked)
+    GPIO.setup(req_switch_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(lid_switch1_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(lid_switch2_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(lock_switch_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    #GPIO.setup(servo_pin, GPIO.OUT)
+    #GPIO.output(servo_pin, GPIO.LOW)
+    GPIO.add_event_detect(req_switch_pin, GPIO.FALLING, callback=callback, bouncetime=600)
+    #p = GPIO.PWM(servo_pin, 50)  # Set frequency to 50hz
+    #p.start(servo_duty_locked)
     return
 
 # shiftOut function, use bit serial transmission.
@@ -80,8 +97,9 @@ def lock_safe():
     Set the GPIO to lock the safe
     :return:
     """
-    global p
-    p.ChangeDutyCycle(servo_duty_locked)
+    print('Diagnostic: Locking safe')
+    #global p
+    #p.ChangeDutyCycle(servo_duty_locked)
     return
 
 
@@ -90,14 +108,29 @@ def unlock_safe():
     Set the GPIO to unlock the safe
     :return:
     """
-    global p
-    p.ChangeDutyCycle(servo_duty_unlocked)
+    print('Diagnostic: Unocking safe')
+    #global p
+    #p.ChangeDutyCycle(servo_duty_unlocked)
     return
+
+
+def get_safe_status() -> Tuple[bool, bool, bool]:
+    """
+    Query the microswitches to determine the safe status
+    :return:
+    """
+    status = GPIO.input(lid_switch1_pin) == GPIO.LOW, \
+             GPIO.input(lid_switch2_pin) == GPIO.LOW, \
+             GPIO.input(lock_switch_pin) == GPIO.LOW
+    logging.debug('Safe status = {}'.format(status))
+    print('Safe status = {}'.format(status))
+    return status
 
 
 def button_pressed(channel):  # Interrupt call when button has been pressed
     global light_state
     seq = ['5R', '4R', '3R', '2R', '1R', 'OFF', 'G']
+    print(get_safe_status())
     light_state += 1
     light_state = light_state % 7
     print('Setting lights to {}'.format(seq[light_state]))
@@ -110,9 +143,9 @@ def destroy_gpio():  # When 'Ctrl+C' is pressed, the function is executed.
 
     :return:
     """
-    global p
+    #global p
     set_lights('OFF')
-    p.stop()
+    #p.stop()
     GPIO.cleanup()
 
 

@@ -20,6 +20,7 @@ import safe_gpio
 # Parameters
 version = '0.2.0 - 21 January 2019'
 safe_homedir = './'
+safe_keydir = './Keys/'
 server_url_base = 'http://192.168.0.3:8000/'
 
 
@@ -48,9 +49,9 @@ def generate_key(password: bytes) -> Tuple[RSAPrivateKeyWithSerialization, bytes
         format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
     # Write both keys to disk
-    with open(os.path.join(safe_homedir, 'private_key.pem'), "wb") as key_file:
+    with open(os.path.join(safe_keydir, 'private_key.pem'), "wb") as key_file:
         key_file.write(rsa_private_key_pem)
-    with open(os.path.join(safe_homedir, 'public_key.pem'), "wb") as key_file:
+    with open(os.path.join(safe_keydir, 'public_key.pem'), "wb") as key_file:
         key_file.write(rsa_public_key_pem)
 
     return rsa_private_key, rsa_public_key_pem
@@ -91,15 +92,15 @@ def get_safe_keys() -> Tuple[RSAPrivateKeyWithSerialization, bytes]:
     """
     hardware_id_bytes = bytes(hardware_id.encode('utf-8'))
 
-    if os.path.isfile(os.path.join(safe_homedir, 'private_key.pem')):
+    if os.path.isfile(os.path.join(safe_keydir, 'private_key.pem')):
         logging.debug('Reading keys from disk')
-        with open(os.path.join(safe_homedir, 'private_key.pem'), "rb") as key_file:
+        with open(os.path.join(safe_keydir, 'private_key.pem'), "rb") as key_file:
             rsa_private_key = serialization.load_pem_private_key(
                 key_file.read(),
                 password=hardware_id_bytes,
                 backend=default_backend()
             )
-        with open(os.path.join(safe_homedir, 'public_key.pem'), "rb") as key_file:
+        with open(os.path.join(safe_keydir, 'public_key.pem'), "rb") as key_file:
             rsa_public_key_pem = key_file.read()
     else:
         logging.debug('Generating new keys')
@@ -112,8 +113,8 @@ def get_server_key() -> bytes:
     Checks if we have have the server public key on disk. Requests it from the server if not
     :return: bytes
     """
-    if os.path.isfile(os.path.join(safe_homedir, 'server_key.pem')):
-        with open(os.path.join(safe_homedir, 'server_key.pem'), "rb") as key_file:
+    if os.path.isfile(os.path.join(safe_keydir, 'server_key.pem')):
+        with open(os.path.join(safe_keydir, 'server_key.pem'), "rb") as key_file:
             public_key_pem = key_file.read()
             logging.debug('Got server public key - from local store')
     else:
@@ -126,7 +127,7 @@ def get_server_key() -> bytes:
             # Write the server public key to local storage
             public_key_pem = bytes(response.text, 'utf-8')
             print(public_key_pem)
-            with open(os.path.join(safe_homedir, 'server_key.pem'), "wb") as key_file:
+            with open(os.path.join(safe_keydir, 'server_key.pem'), "wb") as key_file:
                 key_file.write(public_key_pem)
                 logging.debug('Got server public key - from "server"')
         else:
@@ -336,23 +337,23 @@ def set_settings(settings_msg):
     return
 
 
-def get_safe_status() -> Tuple[bool, bool, bool]:
-    """
-    Get the status of the safe from the hardware registers.
-    Returns safe status - Tuple of bools for the three sensors (bolt, hinge, lid)
-    """
-    # Temporary code - real code to read RPi GPIO pins
-    filename = './safe_status.txt'
-    with open(filename, mode='r') as file:
-        status_text = file.readline()
-    status = status_text.split(':')
-    for i in range(len(status)):
-        if status[i] == 'TRUE':
-            status[i] = True
-        else:
-            status[i] = False
-    # logging.debug('Safe status = {}'.format(status))
-    return tuple(status)
+# def get_safe_status() -> Tuple[bool, bool, bool]:
+#     """
+#     Get the status of the safe from the hardware registers.
+#     Returns safe status - Tuple of bools for the three sensors (bolt, hinge, lid)
+#     """
+#     # Temporary code - real code to read RPi GPIO pins
+#     filename = './safe_status.txt'
+#     with open(filename, mode='r') as file:
+#         status_text = file.readline()
+#     status = status_text.split(':')
+#     for i in range(len(status)):
+#         if status[i] == 'TRUE':
+#             status[i] = True
+#         else:
+#             status[i] = False
+#     # logging.debug('Safe status = {}'.format(status))
+#     return tuple(status)
 
 
 def show_lights(now: datetime.datetime):
@@ -468,7 +469,7 @@ def mainloop() -> None:
     while True:
         now = datetime.datetime.now(datetime.timezone.utc)
         # Get safe status
-        safe_status = get_safe_status()
+        safe_status = safe_gpio.get_safe_status()
         # Log an event if safe status changes
         if not all(safe_status) and unlock_status != 'open':
             log_event('SAFE_OPEN')
