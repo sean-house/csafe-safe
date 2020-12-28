@@ -156,10 +156,10 @@ def check_in(status: Tuple[bool, bool, bool]) -> bool:
     global unlock_time
     now = datetime.now(timezone.utc)
     # Send status to server
-    safe_message = 'STATUS,{},{},{},{},{}\n'.format(safe, now, status[0], status[1],
+    safe_message = 'STATUS,{},{},{},{},{}\n'.format(hardware_id, now, status[0], status[1],
                                                     status[2])
-    for i in range(len(event_log[safe])):
-        event = event_log[safe].pop(0)
+    for i in range(len(event_log)):
+        event = event_log.pop(0)
         safe_message = safe_message + 'EVENT,{},{}\n'.format(event[0], event[1])
     logging.debug(f'Safe: {safe} - Safe message = {safe_message}')
     # Sign safe message
@@ -184,7 +184,7 @@ def check_in(status: Tuple[bool, bool, bool]) -> bool:
     server_url = server_url_base + 'api/checkin'
     parameters = \
         {
-            'hwid': safe, 'sig': str(safe_message_sig_64, 'utf-8'),
+            'hwid': hardware_id, 'sig': str(safe_message_sig_64, 'utf-8'),
             'msg': str(safe_message_enc_64, 'utf-8')
         }
     print(f"Checkin - submitting {parameters}")
@@ -216,7 +216,7 @@ def check_in(status: Tuple[bool, bool, bool]) -> bool:
                     ))
             decrypt_success = True
         except ValueError:
-            logging.error(f"Safe: {safe} - Decrypting error")
+            logging.error(f"Safe: {hardware_id} - Decrypting error")
             decrypt_success = False
 
         # Check signature if decryption was successful
@@ -233,7 +233,7 @@ def check_in(status: Tuple[bool, bool, bool]) -> bool:
                 signature_valid = True
                 # print('Signature valid')
             except InvalidSignature as e:
-                logging.info(f'Safe: {safe} - Invalid signature : {e}')
+                logging.info(f'Safe: {hardware_id} - Invalid signature : {e}')
                 signature_valid = False
         else:
             signature_valid = False
@@ -265,7 +265,7 @@ def check_in(status: Tuple[bool, bool, bool]) -> bool:
                     unlock_time_str = message_parts[1][12:]
                     if unlock_time_str == '':
                         unlock_time = now
-                        logging.error(f'Safe: {safe} - Server message contains no unlock time - setting to now: {now}')
+                        logging.error(f'Safe: {hardware_id} - Server message contains no unlock time - setting to now: {now}')
                     else:
                         if '.' in unlock_time_str:  # The time component has microseconds
                             unlock_time = datetime.strptime(unlock_time_str, '%Y-%m-%d %H:%M:%S.%f')
@@ -281,13 +281,13 @@ def check_in(status: Tuple[bool, bool, bool]) -> bool:
                     validity = False
                 if len(message_parts) > 2:
                     if message_parts[2].startswith('Settings'):
-                        set_settings(message_parts[2], safe)
+                        set_settings(message_parts[2])
                     elif message_parts[2].startswith('Terminate'):
                         if message_parts[2].endswith('TRUE') and operating_mode == logging.DEBUG:
                             # Means for server to terminate safe program - only works in debug mode
-                            logging.debug(f'Safe: {safe} - Terminate message received - exiting app')
+                            logging.debug(f'Safe: {hardware_id} - Terminate message received - exiting app')
                             safe_gpio_sim.destroy_gpio()
-                            print(f'Safe: {safe} - Terminate at server request\n')
+                            print(f'Safe: {hardware_id} - Terminate at server request\n')
                             sys.exit(0)
                     else:
                         validity = False
@@ -301,10 +301,10 @@ def check_in(status: Tuple[bool, bool, bool]) -> bool:
             auth_to_unlock = False
             validity = False
             unlock_time = datetime(2199, 12, 31, 12, 0, 0, 0)
-            log_event('INVALID_MSG_RECD', safe)
+            log_event('INVALID_MSG_RECD')
     except OSError as e:
         logging.error('Request error in CheckIn - {}'.format(e))
-        safe_gpio_sim.set_lights('ERR', safe)
+        safe_gpio.set_lights('ERR')
         validity = False
     return validity
 
