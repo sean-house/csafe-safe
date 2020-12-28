@@ -193,9 +193,9 @@ def check_in(status: Tuple[bool, bool, bool]) -> bool:
     try:
         response = requests.post(server_url, json=parameters)
         if response.ok:
-            logging.debug(f'Safe: {safe} - CheckIn response: {response.text}')
+            logging.debug(f'CheckIn response: {response.text}')
         else:
-            logging.error(f'Safe: {safe} - CheckIn error {response.content}')
+            logging.error(f'CheckIn error {response.content}')
 
         # Extract message and sig from the response JSON object
         parms = response.json()
