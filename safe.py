@@ -126,7 +126,7 @@ def get_server_key() -> bytes:
         parameters = {'hwid': hardware_id, 'pkey': safe_public_key_pem}
         print(hardware_id)
         print(safe_public_key_pem)
-        response = requests.get(server_url, params=parameters)
+        response = requests.post(server_url, json=parameters)
         if response.ok:
             # Write the server public key to local storage
             public_key_pem = bytes(response.text, 'utf-8')
