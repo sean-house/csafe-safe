@@ -21,7 +21,7 @@ import safe_gpio
 version = '0.3.0 - 27 December 2020'
 safe_homedir = './'
 safe_keydir = './Keys/'
-server_url_base = 'Seans-MBP-TB.local:5000/'
+server_url_base = 'http://Seans-MBP-TB.local:5000/'
 #server_url_base = 'http://csafe.azurewebsites.net/'
 
 
