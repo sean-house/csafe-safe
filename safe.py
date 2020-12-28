@@ -161,7 +161,7 @@ def check_in(status: Tuple[bool, bool, bool]) -> bool:
     for i in range(len(event_log)):
         event = event_log.pop(0)
         safe_message = safe_message + 'EVENT,{},{}\n'.format(event[0], event[1])
-    logging.debug(f'Safe: {safe} - Safe message = {safe_message}')
+    logging.debug(f'Safe: {hardware_id} - Safe message = {safe_message}')
     # Sign safe message
     safe_message_bin = bytes(safe_message.encode('UTF-8'))
     safe_message_sig = safe_private_key.sign(
