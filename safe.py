@@ -1,7 +1,7 @@
 # Modules
 import os
 import sys
-import datetime
+from datetime import datetime, timezone
 import subprocess
 import base64
 import logging
@@ -18,10 +18,11 @@ from cryptography.exceptions import InvalidSignature
 import safe_gpio
 
 # Parameters
-version = '0.2.0 - 21 January 2019'
+version = '0.3.0 - 27 December 2020'
 safe_homedir = './'
 safe_keydir = './Keys/'
-server_url_base = 'http://192.168.0.3:8000/'
+server_url_base = 'http://192.168.0.194:5000/'
+#server_url_base = 'http://csafe.azurewebsites.net/'
 
 
 
@@ -49,6 +50,9 @@ def generate_key(password: bytes) -> Tuple[RSAPrivateKeyWithSerialization, bytes
         format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
     # Write both keys to disk
+    # Check the directory exists first
+    if not os.path.isdir(safe_keydir):
+        os.mkdir(safe_keydir)
     with open(os.path.join(safe_keydir, 'private_key.pem'), "wb") as key_file:
         key_file.write(rsa_private_key_pem)
     with open(os.path.join(safe_keydir, 'public_key.pem'), "wb") as key_file:
@@ -141,86 +145,91 @@ def get_server_key() -> bytes:
 
 def check_in(status: Tuple[bool, bool, bool]) -> bool:
     """
-    Checks in with the server - reports the safe status, gets authorisation to unlock
-    :return: Tuple(auth_to_unlock: bool, unlock_time: datetime.datetime)
-    """
+        Checks in with the server - reports the safe status, gets authorisation to unlock
+        :return: Tuple(auth_to_unlock: bool, unlock_time: datetime.datetime)
+        """
     global auth_to_unlock
     global unlock_time
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.now(timezone.utc)
     # Send status to server
-    safe_message = 'STATUS,{},{},{},{},{}\n'.format(hardware_id, now, status[0], status[1],
+    safe_message = 'STATUS,{},{},{},{},{}\n'.format(safe, now, status[0], status[1],
                                                     status[2])
-    for i in range(len(event_log)):
-        event = event_log.pop(0)
+    for i in range(len(event_log[safe])):
+        event = event_log[safe].pop(0)
         safe_message = safe_message + 'EVENT,{},{}\n'.format(event[0], event[1])
-    logging.debug('Safe message = {}'.format(safe_message))
+    logging.debug(f'Safe: {safe} - Safe message = {safe_message}')
     # Sign safe message
     safe_message_bin = bytes(safe_message.encode('UTF-8'))
     safe_message_sig = safe_private_key.sign(
-        safe_message_bin,
-        padding.PSS(
-            mgf=padding.MGF1(hashes.SHA256()),
-            salt_length=padding.PSS.MAX_LENGTH
-        ),
-        hashes.SHA256())
+            safe_message_bin,
+            padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256())
     safe_message_sig_64 = base64.urlsafe_b64encode(safe_message_sig)
     # Encrypt safe message
     safe_message_enc = server_public_key.encrypt(
-        safe_message_bin,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        ))
+            safe_message_bin,
+            padding.OAEP(
+                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None
+            ))
     safe_message_enc_64 = base64.urlsafe_b64encode(safe_message_enc)
     server_url = server_url_base + 'api/checkin'
     parameters = \
         {
-            'hwid': hardware_id, 'sig': str(safe_message_sig_64, 'utf-8'),
+            'hwid': safe, 'sig': str(safe_message_sig_64, 'utf-8'),
             'msg': str(safe_message_enc_64, 'utf-8')
         }
+    print(f"Checkin - submitting {parameters}")
 
     # Submit to server and get response
     try:
-        response = requests.get(server_url, params=parameters)
+        response = requests.post(server_url, json=parameters)
         if response.ok:
-            logging.debug('CheckIn response: {}'.format(response.text))
+            logging.debug(f'Safe: {safe} - CheckIn response: {response.text}')
         else:
-            logging.error('CheckIn error {}'.format(response.content))
+            logging.error(f'Safe: {safe} - CheckIn error {response.content}')
 
-        # Extract message and sig from the HTTPResponse
-        separator = '***PART***'
-        if separator in response.text:
-            server_message_enc_64, server_message_sig_64 = response.text.split(separator)
+        # Extract message and sig from the response JSON object
+        parms = response.json()
+        if all(map(lambda x: x in parms, ['msg', 'sig'])):
+            server_message_enc_64 = parms['msg']
+            server_message_sig_64 = parms['sig']
+        else:
+            return False
 
         # Decrypt
         try:
             plaintext = safe_private_key.decrypt(
-                base64.urlsafe_b64decode(server_message_enc_64),
-                padding.OAEP(
-                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                    algorithm=hashes.SHA256(),
-                    label=None
-                ))
+                    base64.urlsafe_b64decode(server_message_enc_64),
+                    padding.OAEP(
+                            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                            algorithm=hashes.SHA256(),
+                            label=None
+                    ))
             decrypt_success = True
         except ValueError:
+            logging.error(f"Safe: {safe} - Decrypting error")
             decrypt_success = False
 
         # Check signature if decryption was successful
         if decrypt_success:
             try:
                 server_public_key.verify(
-                    base64.urlsafe_b64decode(server_message_sig_64),
-                    plaintext,
-                    padding.PSS(
-                        mgf=padding.MGF1(hashes.SHA256()),
-                        salt_length=padding.PSS.MAX_LENGTH
-                    ),
-                    hashes.SHA256())
+                        base64.urlsafe_b64decode(server_message_sig_64),
+                        plaintext,
+                        padding.PSS(
+                                mgf=padding.MGF1(hashes.SHA256()),
+                                salt_length=padding.PSS.MAX_LENGTH
+                        ),
+                        hashes.SHA256())
                 signature_valid = True
                 # print('Signature valid')
             except InvalidSignature as e:
-                logging.info('Invalid signature : {}'.format(e))
+                logging.info(f'Safe: {safe} - Invalid signature : {e}')
                 signature_valid = False
         else:
             signature_valid = False
@@ -229,33 +238,36 @@ def check_in(status: Tuple[bool, bool, bool]) -> bool:
             # Interpret message and test message validity
             p1_validity = False
             p2_validity = False
-            now = datetime.datetime.now(datetime.timezone.utc)
+            now = datetime.now(timezone.utc)
             plaintext = str(plaintext.decode('utf-8'))
-            # print(plaintext)
             message_parts = plaintext.split('\n')
             print(message_parts)
             if len(message_parts) >= 2:
                 if message_parts[0].startswith('Auth_to_unlock'):
                     m0_parts = message_parts[0].split(':', 2)
+                    auth_tstamp = datetime.strptime(m0_parts[2], '%Y-%m-%d %H:%M:%S.%f')
+                    auth_tstamp = auth_tstamp.replace(tzinfo=timezone.utc)  # Localize the returned timestamp to UTC
                     if m0_parts[1] == 'TRUE':
                         auth_to_unlock = True
-                        if datetime.datetime.strptime(''.join(m0_parts[2].rsplit(':', 1)),
-                                                      '%Y-%m-%d %H:%M:%S.%f%z') < now:
+                        print(f"m0_parts = {m0_parts[2]}")
+                        if auth_tstamp < now:
                             p1_validity = True
                     elif m0_parts[1] == 'FALSE':
                         auth_to_unlock = False
-                        if datetime.datetime.strptime(''.join(m0_parts[2].rsplit(':', 1)),
-                                                      '%Y-%m-%d %H:%M:%S.%f%z') < now:
+                        if auth_tstamp < now:
                             p1_validity = True
                 if message_parts[1].startswith('Unlock_time'):
-                    m1_parts = message_parts[1].split(':', 1)
                     # If no unlock time given, default to unlock now as a safety feature
-                    unlock_time_str = ''.join(m1_parts[1].rsplit(':', 1))
-                    if unlock_time_str == 'None':
+                    unlock_time_str = message_parts[1][12:]
+                    if unlock_time_str == '':
                         unlock_time = now
-                        logging.error('Server message contains no unlock time - setting to now: {}'.format(now))
+                        logging.error(f'Safe: {safe} - Server message contains no unlock time - setting to now: {now}')
                     else:
-                        unlock_time = datetime.datetime.strptime(unlock_time_str, '%Y-%m-%d %H:%M:%S%z')
+                        if '.' in unlock_time_str:  # The time component has microseconds
+                            unlock_time = datetime.strptime(unlock_time_str, '%Y-%m-%d %H:%M:%S.%f')
+                        else:
+                            unlock_time = datetime.strptime(unlock_time_str, '%Y-%m-%d %H:%M:%S')
+                    unlock_time = unlock_time.replace(tzinfo=timezone.utc)
                     p2_validity = True
                 if p1_validity and p2_validity:
                     validity = True
@@ -265,13 +277,13 @@ def check_in(status: Tuple[bool, bool, bool]) -> bool:
                     validity = False
                 if len(message_parts) > 2:
                     if message_parts[2].startswith('Settings'):
-                        set_settings(message_parts[2])
+                        set_settings(message_parts[2], safe)
                     elif message_parts[2].startswith('Terminate'):
                         if message_parts[2].endswith('TRUE') and operating_mode == logging.DEBUG:
                             # Means for server to terminate safe program - only works in debug mode
-                            logging.debug('Terminate message received - exiting app')
-                            safe_gpio.destroy_gpio()
-                            print('Terminate at server request\n')
+                            logging.debug(f'Safe: {safe} - Terminate message received - exiting app')
+                            safe_gpio_sim.destroy_gpio()
+                            print(f'Safe: {safe} - Terminate at server request\n')
                             sys.exit(0)
                     else:
                         validity = False
@@ -284,11 +296,11 @@ def check_in(status: Tuple[bool, bool, bool]) -> bool:
             # if signature is invalid effectively prevent unlock
             auth_to_unlock = False
             validity = False
-            unlock_time = datetime.datetime(2199, 12, 31, 12, 0, 0, 0)
-            log_event('INVALID_MSG_RECD')
+            unlock_time = datetime(2199, 12, 31, 12, 0, 0, 0)
+            log_event('INVALID_MSG_RECD', safe)
     except OSError as e:
         logging.error('Request error in CheckIn - {}'.format(e))
-        safe_gpio.set_lights('ERR')
+        safe_gpio_sim.set_lights('ERR', safe)
         validity = False
     return validity
 
@@ -337,26 +349,7 @@ def set_settings(settings_msg):
     return
 
 
-# def get_safe_status() -> Tuple[bool, bool, bool]:
-#     """
-#     Get the status of the safe from the hardware registers.
-#     Returns safe status - Tuple of bools for the three sensors (bolt, hinge, lid)
-#     """
-#     # Temporary code - real code to read RPi GPIO pins
-#     filename = './safe_status.txt'
-#     with open(filename, mode='r') as file:
-#         status_text = file.readline()
-#     status = status_text.split(':')
-#     for i in range(len(status)):
-#         if status[i] == 'TRUE':
-#             status[i] = True
-#         else:
-#             status[i] = False
-#     # logging.debug('Safe status = {}'.format(status))
-#     return tuple(status)
-
-
-def show_lights(now: datetime.datetime):
+def show_lights(now: datetime):
     """
     Display lights on the safe showing the auth to unlock 'G', and up to 5 lights 'R'
     giving proximity to unlock time in proximity units.
@@ -376,6 +369,10 @@ def show_lights(now: datetime.datetime):
     if auth_to_unlock:
         safe_gpio.set_lights('G')
         print('Safe lights set to "G"')
+        if lock_engaged:
+            print('Unlocking safe')
+            safe_gpio.unlock_safe()
+            lock_engaged = False
     else:
         # If the lock is not already engaged - engage it
         if not lock_engaged:
@@ -401,7 +398,7 @@ def log_event(event: str) -> None:
     :return:
     """
     global event_log
-    event_log.append((datetime.datetime.now(datetime.timezone.utc), event))
+    event_log.append((datetime.now(timezone.utc), event))
     return
 
 
@@ -448,7 +445,7 @@ def button_pushed(channel):
         print('Unlocking not permitted')
         logging.debug('Button pressed - not permitted to unlock')
         dissuasion()
-        show_lights(datetime.datetime.now(datetime.timezone.utc))
+        show_lights(datetime.now(timezone.utc))
         if not lock_engaged:
             safe_gpio.lock_safe()
             lock_engaged = True
@@ -467,7 +464,7 @@ def mainloop() -> None:
     unlock_status = 'indeterminate'
     auth_to_unlock = False
     while True:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.now(timezone.utc)
         # Get safe status
         safe_status = safe_gpio.get_safe_status()
         # Log an event if safe status changes
@@ -501,7 +498,7 @@ if __name__ == '__main__':
     proximityunit = 'H'
     displayproximity = True
     auth_to_unlock = False
-    unlock_time = datetime.datetime(2199, 12, 31, 12, 0, 0, 0).replace(tzinfo=datetime.timezone.utc)  # Long default
+    unlock_time = datetime(2199, 12, 31, 12, 0, 0, 0).replace(tzinfo=timezone.utc)  # Long default
     event_log = []
     operating_mode = logging.DEBUG
     log_event('STARTING_OPERATION')
@@ -517,8 +514,7 @@ if __name__ == '__main__':
     print('Starting')
 
     safe_gpio.setup_gpio(button_pushed)
-    safe_gpio.lock_safe()
-    lock_engaged = True
+    lock_engaged = all(safe_gpio.get_safe_status())
 
     spin_lights()
 
