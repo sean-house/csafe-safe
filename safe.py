@@ -129,7 +129,11 @@ def get_server_key() -> bytes:
         response = requests.post(server_url, json=parameters)
         if response.ok:
             # Write the server public key to local storage
-            public_key_pem = bytes(response.text, 'utf-8')
+            if 'key' in response.json():
+                public_key_pem = bytes(response.json()['key'], 'utf-8')
+            else:
+                print('No "key" element in server JSON response')
+                sys.exit(-1)
             print(public_key_pem)
             with open(os.path.join(safe_keydir, 'server_key.pem'), "wb") as key_file:
                 key_file.write(public_key_pem)
