@@ -21,8 +21,8 @@ import safe_gpio
 version = '0.3.0 - 27 December 2020'
 safe_homedir = './'
 safe_keydir = './Keys/'
-server_url_base = 'http://Seans-MBP-TB.local:5000/'
-#server_url_base = 'http://csafe.azurewebsites.net/'
+#server_url_base = 'http://Seans-MBP-TB.local:5000/'
+server_url_base = 'https://csafe-server.herokuapp.com/'
 
 
 
@@ -187,7 +187,7 @@ def check_in(status: Tuple[bool, bool, bool]) -> bool:
             'hwid': hardware_id, 'sig': str(safe_message_sig_64, 'utf-8'),
             'msg': str(safe_message_enc_64, 'utf-8')
         }
-    print(f"Checkin - submitting {parameters}")
+    #print(f"Checkin - submitting {parameters}")
 
     # Submit to server and get response
     try:
